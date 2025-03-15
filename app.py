@@ -1,14 +1,16 @@
 __version__ = "1.1.2"
 
-import html
-import os
+import html, os
+import urllib.parse
 
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
-from sanic import Sanic, response
-from sanic.exceptions import NotFound
+from sanic import Sanic, response, redirect
+from sanic.exceptions import NotFound, BadRequest, Unauthorized
 from jinja2 import Environment, FileSystemLoader
+import requests
 
+from core.auth import encode_jwt, protected
 from core.models import LogEntry
 
 load_dotenv()
@@ -29,6 +31,13 @@ if not MONGO_URI:
     exit(1)
 
 app = Sanic(__name__)
+
+app.config.CLIENT_ID = os.getenv("CLIENT_ID")
+app.config.CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+app.config.AUTH_REDIRECT_URI = os.getenv("AUTH_REDIRECT_URI")
+app.config.AUTH_OAUTH2_URI = f"https://discord.com/oauth2/authorize?client_id={app.config.CLIENT_ID}&response_type=code&redirect_uri={urllib.parse.quote(app.config.AUTH_REDIRECT_URI)}&scope=guilds.members.read"
+app.config.GUILD_ID = os.getenv("GUILD_ID")
+
 app.static("/static", "./static")
 
 jinja_env = Environment(loader=FileSystemLoader("templates"))
@@ -82,6 +91,7 @@ async def index(request):
 
 
 @app.get(prefix + "/raw/<key>")
+@protected
 async def get_raw_logs_file(request, key):
     """Returns the plain text rendered log entry"""
     document = await app.ctx.db.logs.find_one({"key": key})
@@ -95,6 +105,7 @@ async def get_raw_logs_file(request, key):
 
 
 @app.get(prefix + "/<key>")
+@protected
 async def get_logs_file(request, key):
     """Returns the html rendered log entry"""
     document = await app.ctx.db.logs.find_one({"key": key})
@@ -107,9 +118,54 @@ async def get_logs_file(request, key):
     return log_entry.render_html()
 
 
+@app.get("/auth/login")
+def login(_):
+    return redirect(app.config.AUTH_OAUTH2_URI)
+
+@app.get("/auth/redirect")
+async def authenticate(request):
+    code = request.args.get("code")
+    if not code:
+        raise BadRequest("Missing code query")
+
+    data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": app.config.AUTH_REDIRECT_URI,
+    }
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    r = requests.post("https://discord.com/api/v10/oauth2/token", data=data, headers=headers, auth=(app.config.CLIENT_ID, app.config.CLIENT_SECRET))
+    r.raise_for_status()
+    r = r.json()
+    access_token = r["access_token"]
+    refresh_token = r["refresh_token"]
+    expires_in = r["expires_in"]
+    response = redirect("/")
+
+    headers["Authorization"] = f"Bearer {access_token}"
+    r = requests.get(f"https://discord.com/api/v10/users/@me/guilds/{app.config.GUILD_ID}/member", headers=headers)
+    r.raise_for_status()
+    r = r.json()
+    oauth_whitelist = (await app.ctx.db.config.find_one())["oauth_whitelist"]
+    whitelisted = False
+    if int(r["user"]["id"]) in oauth_whitelist:
+        whitelisted = True
+    if not whitelisted:
+        for role_id in r["roles"]:
+            if int(role_id) in oauth_whitelist:
+                whitelisted = True
+                break
+    if not whitelisted:
+        raise Unauthorized()
+    bearer_token = encode_jwt(access_token, refresh_token, expires_in)
+    response.add_cookie("bearer_token", bearer_token, max_age=expires_in, httponly=True)
+    return response
+
 if __name__ == "__main__":
     app.run(
         host=os.getenv("HOST", "0.0.0.0"),
-        port=os.getenv("PORT", 8000),
+        port=int(os.getenv("PORT", 8000)),
         debug=bool(os.getenv("DEBUG", False)),
     )
