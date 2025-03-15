@@ -1,6 +1,7 @@
 __version__ = "1.1.2"
 
-import html, os
+import html
+import os
 import urllib.parse
 
 from dotenv import load_dotenv
@@ -10,7 +11,7 @@ from sanic.exceptions import NotFound, BadRequest, Unauthorized
 from jinja2 import Environment, FileSystemLoader
 import requests
 
-from core.auth import encode_jwt, protected
+from core.auth import encode_bearer_token, protected
 from core.models import LogEntry
 
 load_dotenv()
@@ -26,8 +27,10 @@ if prefix == "NONE":
 
 MONGO_URI = os.getenv("MONGO_URI") or os.getenv("CONNECTION_URI")
 if not MONGO_URI:
-    print("No CONNECTION_URI config var found. "
-          "Please enter your MongoDB connection URI in the configuration or .env file.")
+    print(
+        "No CONNECTION_URI config var found. "
+        "Please enter your MongoDB connection URI in the configuration or .env file."
+    )
     exit(1)
 
 app = Sanic(__name__)
@@ -62,9 +65,9 @@ def strtobool(val):
     'val' is anything else.
     """
     val = val.lower()
-    if val in ('y', 'yes', 't', 'true', 'on', '1'):
+    if val in ("y", "yes", "t", "true", "on", "1"):
         return 1
-    elif val in ('n', 'no', 'f', 'false', 'off', '0'):
+    elif val in ("n", "no", "f", "false", "off", "0"):
         return 0
     else:
         raise ValueError("invalid truth value %r" % (val,))
@@ -75,10 +78,15 @@ async def init(app, loop):
     app.ctx.db = AsyncIOMotorClient(MONGO_URI).modmail_bot
     use_attachment_proxy = strtobool(os.getenv("USE_ATTACHMENT_PROXY", "no"))
     if use_attachment_proxy:
-        app.ctx.attachment_proxy_url = os.getenv("ATTACHMENT_PROXY_URL", "https://cdn.discordapp.xyz")
-        app.ctx.attachment_proxy_url = html.escape(app.ctx.attachment_proxy_url).rstrip("/")
+        app.ctx.attachment_proxy_url = os.getenv(
+            "ATTACHMENT_PROXY_URL", "https://cdn.discordapp.xyz"
+        )
+        app.ctx.attachment_proxy_url = html.escape(app.ctx.attachment_proxy_url).rstrip(
+            "/"
+        )
     else:
         app.ctx.attachment_proxy_url = None
+
 
 @app.exception(NotFound)
 async def not_found(request, exc):
@@ -122,21 +130,23 @@ async def get_logs_file(request, key):
 def login(_):
     return redirect(app.config.AUTH_OAUTH2_URI)
 
+
 @app.get("/auth/redirect")
 async def authenticate(request):
     code = request.args.get("code")
     if not code:
         raise BadRequest("Missing code query")
 
-    data = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": app.config.AUTH_REDIRECT_URI,
-    }
-    headers = {
-        "Content-Type": "application/x-www-form-urlencoded"
-    }
-    r = requests.post("https://discord.com/api/v10/oauth2/token", data=data, headers=headers, auth=(app.config.CLIENT_ID, app.config.CLIENT_SECRET))
+    r = requests.post(
+        "https://discord.com/api/v10/oauth2/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": app.config.AUTH_REDIRECT_URI,
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        auth=(app.config.CLIENT_ID, app.config.CLIENT_SECRET),
+    )
     r.raise_for_status()
     r = r.json()
     access_token = r["access_token"]
@@ -144,8 +154,10 @@ async def authenticate(request):
     expires_in = r["expires_in"]
     response = redirect("/")
 
-    headers["Authorization"] = f"Bearer {access_token}"
-    r = requests.get(f"https://discord.com/api/v10/users/@me/guilds/{app.config.GUILD_ID}/member", headers=headers)
+    r = requests.get(
+        f"https://discord.com/api/v10/users/@me/guilds/{app.config.GUILD_ID}/member",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
     r.raise_for_status()
     r = r.json()
     oauth_whitelist = (await app.ctx.db.config.find_one())["oauth_whitelist"]
@@ -159,9 +171,17 @@ async def authenticate(request):
                 break
     if not whitelisted:
         raise Unauthorized()
-    bearer_token = encode_jwt(access_token, refresh_token, expires_in)
-    response.add_cookie("bearer_token", bearer_token, max_age=expires_in, httponly=True)
+    bearer_token = encode_bearer_token(access_token, refresh_token, expires_in)
+    response.add_cookie(
+        "bearer_token",
+        bearer_token,
+        max_age=expires_in,
+        domain=f".{os.getenv("DOMAIN")}",
+        samesite="Strict",
+        httponly=True,
+    )
     return response
+
 
 if __name__ == "__main__":
     app.run(

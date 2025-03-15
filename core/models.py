@@ -1,9 +1,7 @@
 from datetime import datetime, timezone
 import dateutil.parser
-
 from sanic import response
 from natural.date import duration
-
 from .formatter import format_content_html
 
 
@@ -12,19 +10,24 @@ class LogEntry:
         self.app = app
         self.key = data["key"]
         self.open = data["open"]
-        self.created_at = dateutil.parser.parse(data["created_at"]).astimezone(timezone.utc)
-        self.human_created_at = duration(self.created_at, now=datetime.now(timezone.utc))
+        self.created_at = dateutil.parser.parse(
+            data["created_at"]).astimezone(timezone.utc)
+        self.human_created_at = duration(
+            self.created_at, now=datetime.now(timezone.utc))
         self.closed_at = (
-            dateutil.parser.parse(data["closed_at"]).astimezone(timezone.utc) if not self.open else None
+            dateutil.parser.parse(data["closed_at"]).astimezone(
+                timezone.utc) if not self.open else None
         )
         self.channel_id = int(data["channel_id"])
         self.guild_id = int(data["guild_id"])
         self.creator = User(app, data["creator"])
         self.recipient = User(app, data["recipient"])
         self.closer = User(app, data["closer"]) if not self.open else None
-        self.close_message = format_content_html(data.get("close_message") or "")
+        self.close_message = format_content_html(
+            data.get("close_message") or "")
         self.messages = [Message(app, m) for m in data["messages"]]
-        self.internal_messages = [m for m in self.messages if m.type == "internal"]
+        self.internal_messages = [
+            m for m in self.messages if m.type == "internal"]
         self.thread_messages = [
             m for m in self.messages if m.type not in ("internal", "system")
         ]
@@ -163,8 +166,10 @@ class Attachment:
             self.is_image = data["is_image"]
             self.size = data["size"]
         if self.app.ctx.attachment_proxy_url is not None:
-            self.url = self.url.replace("https://cdn.discordapp.com", self.app.ctx.attachment_proxy_url)
-            self.url = self.url.replace("https://media.discordapp.net", self.app.ctx.attachment_proxy_url)
+            self.url = self.url.replace(
+                "https://cdn.discordapp.com", self.app.ctx.attachment_proxy_url)
+            self.url = self.url.replace(
+                "https://media.discordapp.net", self.app.ctx.attachment_proxy_url)
             print(self.url)
 
 
@@ -172,8 +177,10 @@ class Message:
     def __init__(self, app, data):
         self.app = app
         self.id = int(data["message_id"])
-        self.created_at = dateutil.parser.parse(data["timestamp"]).astimezone(timezone.utc)
-        self.human_created_at = duration(self.created_at, now=datetime.now(timezone.utc))
+        self.created_at = dateutil.parser.parse(
+            data["timestamp"]).astimezone(timezone.utc)
+        self.human_created_at = duration(
+            self.created_at, now=datetime.now(timezone.utc))
         self.raw_content = data["content"]
         self.content = self.format_html_content(self.raw_content)
         self.attachments = [Attachment(app, a) for a in data["attachments"]]

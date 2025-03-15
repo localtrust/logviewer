@@ -11,7 +11,8 @@ def format_content_html(content: str, allow_links: bool = False) -> str:
         return "\x1AM" + encoded + "\x1AM"
 
     # Encode multiline codeblocks (```text```)
-    content = re.sub(r"```+((?:[^`]*?\n)?(?:[^`]+))\n?```+", encode_codeblock, content)
+    content = re.sub(
+        r"```+((?:[^`]*?\n)?(?:[^`]+))\n?```+", encode_codeblock, content)
 
     content = html.escape(content)
 
@@ -102,7 +103,8 @@ def format_content_html(content: str, allow_links: bool = False) -> str:
     content = re.sub("\x1AM(.*?)\x1AM", decode_codeblock, content)
 
     # Meta mentions (@everyone)
-    content = content.replace("@everyone", '<span class="mention">@everyone</span>')
+    content = content.replace(
+        "@everyone", '<span class="mention">@everyone</span>')
 
     # Meta mentions (@here)
     content = content.replace("@here", '<span class="mention">@here</span>')
@@ -113,7 +115,8 @@ def format_content_html(content: str, allow_links: bool = False) -> str:
     )
 
     # Channel mentions (<#id>)
-    content = re.sub(r"(&lt;#\d+&gt;)", r'<span class="mention">\1</span>', content)
+    content = re.sub(r"(&lt;#\d+&gt;)",
+                     r'<span class="mention">\1</span>', content)
 
     # Role mentions (<@&id>)
     content = re.sub(
